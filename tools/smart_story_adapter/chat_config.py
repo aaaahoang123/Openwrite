@@ -61,3 +61,14 @@ class ChatAdapterConfig:
             openwrite_language=get_required("OPENWRITE_LANGUAGE"),
             workspace=get_required("WORKSPACE_DIR"),
         )
+
+    def openwrite_env(self) -> dict[str, str]:
+        env = {
+            "LLM_PROVIDER": self.llm_provider,
+            "LLM_MODEL": self.llm_model,
+            "LLM_API_KEY": self.llm_api_key,
+            "OPENWRITE_LANGUAGE": self.openwrite_language,
+        }
+        if self.llm_base_url:
+            env["LLM_BASE_URL"] = self.llm_base_url
+        return env

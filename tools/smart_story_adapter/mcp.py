@@ -94,3 +94,12 @@ class McpClient:
 
     def import_private_draft(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.call_tool("import_ai_private_draft", payload)
+
+    def report_chat_turn_progress(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.call_tool("report_chat_turn_progress", payload)
+
+    def complete_chat_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.call_tool("complete_chat_turn", payload)
+
+    def get_chat_turn_input(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.call_tool("get_chat_turn_input", payload)
