@@ -77,6 +77,7 @@ def main():
     _add_status_command(subparsers)
     _add_doctor_command(subparsers)
     _add_agent_command(subparsers)
+    _add_chat_turn_command(subparsers)
 
     args = parser.parse_args()
 
@@ -128,6 +129,8 @@ def _dispatch(args) -> int:
         return _cmd_doctor(args)
     elif args.command == "agent":
         return _cmd_agent(args)
+    elif args.command == "chat-turn":
+        return _cmd_chat_turn(args)
     else:
         logger.error(f"未知命令: {args.command}")
         return 1
@@ -138,6 +141,12 @@ def _add_init_command(subparsers):
     p = subparsers.add_parser("init", help="初始化新项目")
     p.add_argument("novel_id", help="小说 ID")
     p.add_argument("--template", "-t", default="default", help="模板类型")
+
+
+def _add_chat_turn_command(subparsers):
+    """chat-turn 命令 (Web Chat 适配器)"""
+    p = subparsers.add_parser("chat-turn", help="执行单轮对话并输出结果")
+    p.add_argument("--in", dest="in_file", required=True, help="TurnInput JSON 文件的路径")
 
 
 def _add_goethe_command(subparsers):
@@ -1134,6 +1143,18 @@ def _cmd_agent(args) -> int:
     """agent 命令 - 已退役"""
     logger.error("openwrite agent 已退役，请改用 openwrite dante。")
     return 1
+
+
+def _cmd_chat_turn(args) -> int:
+    """处理 chat-turn 命令"""
+    try:
+        from tools.web_chat_turn import run_chat_turn
+        from pathlib import Path
+        in_file = Path(args.in_file)
+        return run_chat_turn(in_file, Path.cwd())
+    except Exception as e:
+        logger.error(f"Chat turn 运行失败: {e}", exc_info=True)
+        return 1
 
 
 def build_cli_tool_executors(project_root: Path) -> dict[str, Callable[[dict], dict]]:
