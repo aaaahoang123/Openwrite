@@ -1,6 +1,6 @@
+from __future__ import annotations
 import os
 from dataclasses import dataclass
-from typing import Optional
 
 class ConfigError(Exception):
     pass
@@ -27,7 +27,7 @@ class ChatAdapterConfig:
     workspace: str
 
     @classmethod
-    def from_env(cls) -> "ChatAdapterConfig":
+    def from_env(cls) -> ChatAdapterConfig:
         def get_required(key: str) -> str:
             val = os.environ.get(key)
             if not val:
