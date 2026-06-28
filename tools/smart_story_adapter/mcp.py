@@ -100,6 +100,3 @@ class McpClient:
 
     def complete_chat_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.call_tool("complete_chat_turn", payload)
-
-    def get_chat_turn_input(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.call_tool("get_chat_turn_input", payload)

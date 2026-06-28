@@ -2,9 +2,10 @@ import json
 import pytest
 from pathlib import Path
 from tools.smart_story_adapter.chat_config import ChatAdapterConfig
-from tools.smart_story_adapter.runner import ChatTurnAdapterRunner
+from tools.smart_story_adapter.runner import ChatTurnAdapterRunner, default_run_chat_openwrite
 from tools.smart_story_adapter.config import AdapterError
 import subprocess
+import os
 
 class MockGitOps:
     def __init__(self, conflict=False):
@@ -86,6 +87,8 @@ def config(tmp_path):
 def test_runner_happy_path(tmp_path, config, monkeypatch):
     (tmp_path / "novel_config.yaml").write_text("novel_id: 100")
     
+    os.environ["AGENT_TURN_PAYLOAD"] = '{"recent_messages": []}'
+    
     # Mock openwrite run
     run_args = []
     def mock_run(workspace, cfg):
@@ -112,9 +115,7 @@ def test_runner_happy_path(tmp_path, config, monkeypatch):
     code = runner.run()
     assert code == 0
 
-    # adapter invokes openwrite chat-turn --in turn_input.json
-    # We mocked run_openwrite, but let's check default_run_chat_openwrite is used properly normally or we check if the file is written
-    assert (tmp_path / "turn_input.json").exists()
+    assert (tmp_path / "turn_input.json").read_text() == '{"recent_messages": []}'
 
     # check durable paths (only novel_config.yaml)
     assert len(git.commits) == 1
@@ -226,4 +227,24 @@ def test_mcp_retry_fail(tmp_path, config, monkeypatch):
 
     code = runner.run()
     assert code == 1
+
+def test_default_run_chat_openwrite(tmp_path, config, monkeypatch):
+    calls = []
+    class FakeProcess:
+        returncode = 42
+
+    def fake_subprocess_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeProcess()
+
+    monkeypatch.setattr(subprocess, "run", fake_subprocess_run)
+
+    code = default_run_chat_openwrite(tmp_path, config)
+    assert code == 42
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args == ["openwrite", "chat-turn", "--in", "turn_input.json"]
+    assert kwargs["cwd"] == tmp_path
+    assert "LLM_PROVIDER" in kwargs["env"]
+    assert kwargs["env"]["LLM_PROVIDER"] == "openai"
 

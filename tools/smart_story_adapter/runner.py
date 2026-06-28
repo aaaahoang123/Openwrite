@@ -27,7 +27,6 @@ class ChatProgressClient(Protocol):
     def report_chat_turn_progress(self, payload: dict) -> dict: ...
     def import_private_draft(self, payload: dict) -> dict: ...
     def complete_chat_turn(self, payload: dict) -> dict: ...
-    def get_chat_turn_input(self, payload: dict) -> dict: ...
 
 
 RunOpenWrite = Callable[[Path, AdapterConfig], int]
@@ -171,12 +170,9 @@ class ChatTurnAdapterRunner:
             novel_id = self._novel_id()
             
             # Fetch and write turn_input.json
-            input_data = self.mcp.get_chat_turn_input({
-                "chat_session_id": self.config.chat_session_id,
-                "chat_turn_id": self.config.chat_turn_id
-            })
             input_path = self.workspace / "turn_input.json"
-            input_path.write_text(json.dumps(input_data), encoding="utf-8")
+            input_payload = os.environ.get("AGENT_TURN_PAYLOAD", "{}")
+            input_path.write_text(input_payload, encoding="utf-8")
 
             self._progress("running")
             code = self.run_openwrite(self.workspace, self.config)
