@@ -51,6 +51,29 @@ class GitOps:
             self.run_command(["git", "commit", "-m", message], workspace)
         return self.run_command(["git", "rev-parse", "HEAD"], workspace).strip()
 
+    def get_changed_files(self, workspace: Path) -> list[str]:
+        status = self.run_command(["git", "status", "--porcelain"], workspace)
+        files = []
+        for line in status.splitlines():
+            if len(line) >= 3:
+                # `line` format: " M path", "?? path", "D  path"
+                # Handle rename: "R  old -> new"
+                if " -> " in line[3:]:
+                    _, new_path = line[3:].split(" -> ", 1)
+                    files.append(new_path)
+                else:
+                    files.append(line[3:].strip())
+        return files
+
+    def commit_files(self, workspace: Path, files: list[str], message: str) -> str:
+        if not files:
+            return self.run_command(["git", "rev-parse", "HEAD"], workspace).strip()
+        self.run_command(["git", "add", "--"] + files, workspace)
+        status = self.run_command(["git", "status", "--porcelain"], workspace)
+        if status.strip():
+            self.run_command(["git", "commit", "-m", message], workspace)
+        return self.run_command(["git", "rev-parse", "HEAD"], workspace).strip()
+
     def push(self, workspace: Path, branch: str) -> None:
         self.run_command(["git", "push", "origin", branch], workspace)
 
