@@ -15,11 +15,13 @@ def test_chat_turn_command_dispatches_correctly(tmp_path, monkeypatch):
     def fake_run_chat_turn(input_path, project_root):
         calls.append((input_path, project_root))
         result = {
-            "assistant_message": "Hello",
-            "blocked": False,
-            "open_questions": [],
-            "changed_files": [],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+            "status": "successful",
+            "message": "Hello",
+            "data": {
+                "open_questions": [],
+                "changed_files": [],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+            }
         }
         (project_root / "turn_result.json").write_text(json.dumps(result))
         return 0
@@ -44,11 +46,14 @@ def test_chat_turn_command_dispatches_correctly(tmp_path, monkeypatch):
     assert res_file.exists()
     
     data = json.loads(res_file.read_text())
-    assert "assistant_message" in data
-    assert "blocked" in data
-    assert "open_questions" in data
-    assert "changed_files" in data
-    assert "usage" in data
+    assert "status" in data
+    assert "message" in data
+    assert "data" in data
+    
+    payload = data.get("data") or {}
+    assert "open_questions" in payload
+    assert "changed_files" in payload
+    assert "usage" in payload
 
 def test_chat_turn_integration(tmp_path, monkeypatch):
     import tools.web_chat_turn as wct
@@ -82,10 +87,13 @@ def test_chat_turn_integration(tmp_path, monkeypatch):
     assert res_file.exists()
     
     data = json.loads(res_file.read_text())
-    assert "assistant_message" in data
-    assert data["assistant_message"] == "Mock response"
-    assert "blocked" in data
-    assert "open_questions" in data
-    assert "changed_files" in data
-    assert "usage" in data
+    assert "status" in data
+    assert "message" in data
+    assert data["message"] == "Mock response"
+    assert "data" in data
+    
+    payload = data.get("data") or {}
+    assert "open_questions" in payload
+    assert "changed_files" in payload
+    assert "usage" in payload
 
