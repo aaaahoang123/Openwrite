@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
@@ -32,6 +33,18 @@ class ChatProgressClient(Protocol):
 RunOpenWrite = Callable[[Path, AdapterConfig], int]
 RunChatOpenWrite = Callable[[Path, ChatAdapterConfig], int]
 
+def get_novel_id(workspace: Path) -> str:
+    config_path = workspace / "novel_config.yaml"
+    try:
+        text = config_path.read_text(encoding="utf-8")
+        data = yaml.safe_load(text) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise AdapterError(f"Failed to read novel_config: {exc}", "configuration_missing", "Workspace thiếu novel_config.yaml hợp lệ.") from exc
+    novel_id = str(data.get("novel_id", "")).strip()
+    if not novel_id:
+        raise AdapterError("novel_config.yaml missing novel_id", "configuration_missing", "Workspace thiếu novel_id.")
+    return novel_id
+
 class SmartStoryAdapterRunner:
     def __init__(
         self,
@@ -57,7 +70,7 @@ class SmartStoryAdapterRunner:
                 self.config.source_branch,
             )
             self.git_ops.verify_commit(self.workspace, self.config.source_commit_sha)
-            novel_id = self._novel_id()
+            novel_id = get_novel_id(self.workspace)
             self._progress("running", 20, "Running OpenWrite.")
             code = self.run_openwrite(self.workspace, self.config)
             if code != 0:
@@ -73,25 +86,12 @@ class SmartStoryAdapterRunner:
             self._progress("succeeded", 100, "Completed.", commit_sha=final_commit, output_ids=output_ids)
             return 0
         except AdapterError as exc:
-            import sys
             print(f"AdapterError: {exc}", file=sys.stderr)
             try:
                 self._progress("failed", 100, exc.user_message, failure_category=exc.failure_category, user_message=exc.user_message)
             except Exception as report_exc:
                 print(f"Failed to report error to backend: {report_exc}", file=sys.stderr)
             return 1
-
-    def _novel_id(self) -> str:
-        config_path = self.workspace / "novel_config.yaml"
-        try:
-            text = config_path.read_text(encoding="utf-8")
-            data = yaml.safe_load(text) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            raise AdapterError(f"Failed to read novel_config: {exc}", "configuration_missing", "Workspace thiếu novel_config.yaml hợp lệ.") from exc
-        novel_id = str(data.get("novel_id", "")).strip()
-        if not novel_id:
-            raise AdapterError("novel_config.yaml missing novel_id", "configuration_missing", "Workspace thiếu novel_id.")
-        return novel_id
 
     def _progress(self, status: str, percent: int, message: str, **extra: object) -> None:
         payload = {
@@ -167,7 +167,7 @@ class ChatTurnAdapterRunner:
                 self.config.source_branch,
             )
             self.git_ops.verify_commit(self.workspace, self.config.source_commit_sha)
-            novel_id = self._novel_id()
+            novel_id = get_novel_id(self.workspace)
             
             # Fetch and write turn_input.json
             input_path = self.workspace / "turn_input.json"
@@ -192,9 +192,10 @@ class ChatTurnAdapterRunner:
             events_path = self.workspace / "tool_events.jsonl"
             tool_events = []
             if events_path.exists():
-                for line in events_path.read_text(encoding="utf-8").splitlines():
-                    if line.strip():
-                        tool_events.append(json.loads(line))
+                with events_path.open(encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            tool_events.append(json.loads(line))
             
             # Commit durable files
             changed_files = self.git_ops.get_changed_files(self.workspace)
@@ -232,7 +233,6 @@ class ChatTurnAdapterRunner:
 
             return 0
         except AdapterError as exc:
-            import sys
             print(f"AdapterError: {exc}", file=sys.stderr)
             try:
                 self._complete_failed(exc)
@@ -240,7 +240,6 @@ class ChatTurnAdapterRunner:
                 print(f"Failed to report error to backend: {report_exc}", file=sys.stderr)
             return 1
         except Exception as exc:
-            import sys
             print(f"Unexpected error: {exc}", file=sys.stderr)
             try:
                 self._complete_failed(AdapterError(str(exc), "runtime_crashed", "Lỗi không xác định."))
@@ -249,30 +248,15 @@ class ChatTurnAdapterRunner:
             return 1
 
     def _complete_with_retry(self, payload: dict) -> None:
-        import time
         for attempt in range(3):
             try:
                 self.mcp.complete_chat_turn(payload)
                 return
             except Exception as e:
-                import sys
                 print(f"MCP complete_chat_turn attempt {attempt+1} failed: {e}", file=sys.stderr)
                 time.sleep(2 ** attempt)
         # Final attempt
         self.mcp.complete_chat_turn(payload)
-
-
-    def _novel_id(self) -> str:
-        config_path = self.workspace / "novel_config.yaml"
-        try:
-            text = config_path.read_text(encoding="utf-8")
-            data = yaml.safe_load(text) or {}
-        except (OSError, yaml.YAMLError) as exc:
-            raise AdapterError(f"Failed to read novel_config: {exc}", "configuration_missing", "Workspace thiếu novel_config.yaml hợp lệ.") from exc
-        novel_id = str(data.get("novel_id", "")).strip()
-        if not novel_id:
-            raise AdapterError("novel_config.yaml missing novel_id", "configuration_missing", "Workspace thiếu novel_id.")
-        return novel_id
 
     def _progress(self, status: str, result_data: dict | None = None) -> None:
         payload = {
