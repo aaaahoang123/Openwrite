@@ -98,6 +98,89 @@ def test_chat_turn_integration(tmp_path, monkeypatch):
     assert "usage" in payload
 
 
+def test_chat_turn_hydrates_continuation_state_before_orchestrator(
+    tmp_path, monkeypatch
+):
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(
+        json.dumps(
+            {
+                "recent_messages": [{"role": "user", "content": "continue"}],
+                "pending_confirmation": "outline_scope",
+                "open_questions": ["Which point of view should lead the chapter?"],
+            }
+        )
+    )
+    events = []
+
+    class FakeBookState:
+        pending_confirmation = "stale_confirmation"
+
+    class FakeBookStateStore:
+        state = FakeBookState()
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def load_or_create(self):
+            events.append(("book_load", self.state.pending_confirmation))
+            return self.state
+
+        def save(self, state):
+            events.append(("book_save", state.pending_confirmation))
+
+    class FakeSessionState:
+        open_questions = ["stale question"]
+
+    class FakeSessionStateStore:
+        state = FakeSessionState()
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def load_or_create(self):
+            events.append(("session_load", list(self.state.open_questions)))
+            return self.state
+
+        def save(self, state):
+            events.append(("session_save", list(state.open_questions)))
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_user_message(self, text):
+            events.append(
+                (
+                    "handle",
+                    FakeBookStateStore.state.pending_confirmation,
+                    list(FakeSessionStateStore.state.open_questions),
+                )
+            )
+            return SimpleNamespace(message="Continued", blocked=False)
+
+    monkeypatch.setattr(wct, "BookStateStore", FakeBookStateStore)
+    monkeypatch.setattr(wct, "SessionStateStore", FakeSessionStateStore)
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+    assert events[:5] == [
+        ("book_load", "stale_confirmation"),
+        ("session_load", ["stale question"]),
+        ("book_save", "outline_scope"),
+        ("session_save", ["Which point of view should lead the chapter?"]),
+        (
+            "handle",
+            "outline_scope",
+            ["Which point of view should lead the chapter?"],
+        ),
+    ]
+    assert events[5] == (
+        "session_load",
+        ["Which point of view should lead the chapter?"],
+    )
+
+
 def test_chat_turn_producer_preserves_orchestrator_state(tmp_path, monkeypatch):
     import tools.web_chat_turn as wct
 

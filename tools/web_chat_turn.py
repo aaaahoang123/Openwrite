@@ -46,8 +46,13 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
         session_store = SessionStateStore(project_root, novel_id)
         
         # Hydrate state
-        state_store.load_or_create()
-        session_store.load_or_create()
+        book_state = state_store.load_or_create()
+        session_state = session_store.load_or_create()
+
+        book_state.pending_confirmation = turn_input.pending_confirmation or ""
+        state_store.save(book_state)
+        session_state.open_questions = list(turn_input.open_questions)
+        session_store.save(session_state)
         
         # 5. Call Orchestrator
         tool_executors = build_cli_tool_executors(project_root)
