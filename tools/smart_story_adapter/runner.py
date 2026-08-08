@@ -219,15 +219,28 @@ class ChatTurnAdapterRunner:
                     output_ids.append({"type": "private_draft", "id": result.get("private_draft_id"), "duplicate": result.get("duplicate", False)})
 
             # Call complete_chat_turn with retry
+            result_data = turn_result.data or {}
+            usage = result_data.get("usage") or {}
+            terminal_status = "failed" if turn_result.status == "failed" else "succeeded"
             payload = {
-                "chat_session_id": self.config.chat_session_id,
+                "agent_project_id": self.config.agent_project_id,
                 "chat_turn_id": self.config.chat_turn_id,
-                "status": turn_result.status,
-                "message": turn_result.message,
-                "data": turn_result.data,
-                "tool_events": tool_events,
+                "status": terminal_status,
+                "assistant_message": turn_result.message,
+                "blocked": bool(result_data.get("blocked", turn_result.status == "blocked")),
+                "next_action": result_data.get("next_action"),
+                "pending_confirmation": result_data.get("pending_confirmation"),
+                "open_questions": result_data.get("open_questions", []),
+                "changed_files": durable_files,
                 "commit_sha": final_commit,
-                "output_ids": output_ids
+                "output_ids": output_ids,
+                "tool_events": tool_events,
+                "conversation_summary": result_data.get("conversation_summary"),
+                "input_tokens": usage.get("prompt_tokens"),
+                "output_tokens": usage.get("completion_tokens"),
+                "tool_call_count": result_data.get("tool_call_count", len(tool_events)),
+                "failure_category": result_data.get("failure_category") if terminal_status == "failed" else None,
+                "user_message": result_data.get("user_message") if terminal_status == "failed" else None,
             }
             self._complete_with_retry(payload)
 
@@ -278,17 +291,23 @@ class ChatTurnAdapterRunner:
 
     def _complete_failed(self, exc: AdapterError) -> None:
         payload = {
-            "chat_session_id": self.config.chat_session_id,
+            "agent_project_id": self.config.agent_project_id,
             "chat_turn_id": self.config.chat_turn_id,
             "status": "failed",
-            "message": exc.user_message,
-            "data": {
-                "failure_category": exc.failure_category,
-                "internal_error": str(exc)
-            },
-            "tool_events": [],
+            "assistant_message": exc.user_message,
+            "blocked": False,
+            "next_action": None,
+            "pending_confirmation": None,
+            "open_questions": [],
+            "changed_files": [],
             "commit_sha": None,
-            "output_ids": []
+            "conversation_summary": None,
+            "input_tokens": None,
+            "output_tokens": None,
+            "tool_call_count": 0,
+            "failure_category": exc.failure_category,
+            "user_message": exc.user_message,
+            "tool_events": [],
+            "output_ids": [],
         }
         self._complete_with_retry(payload)
-

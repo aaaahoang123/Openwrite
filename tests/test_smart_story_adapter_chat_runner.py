@@ -130,7 +130,8 @@ def test_runner_happy_path(tmp_path, config, monkeypatch):
     assert mcp.imported_drafts[0]["content"] == "# Title\ncontent"
     
     assert mcp.completed is not None
-    assert mcp.completed["status"] == "successful"
+    assert mcp.completed["status"] == "succeeded"
+    assert mcp.completed["assistant_message"] == "done"
     assert mcp.completed["commit_sha"] == "new_sha"
 
 
@@ -157,7 +158,8 @@ def test_question_only_makes_no_commit(tmp_path, config, monkeypatch):
     assert not git.pushed
     
     assert mcp.completed is not None
-    assert mcp.completed["status"] == "blocked"
+    assert mcp.completed["status"] == "succeeded"
+    assert mcp.completed["blocked"] is True
     assert mcp.completed["commit_sha"] == "old_sha" # fallbacks to old sha
 
 
@@ -182,7 +184,7 @@ def test_git_conflict(tmp_path, config, monkeypatch):
     assert code == 1
     assert mcp.completed is not None
     assert mcp.completed["status"] == "failed"
-    assert mcp.completed["data"]["failure_category"] == "git_conflict"
+    assert mcp.completed["failure_category"] == "git_conflict"
 
 
 def test_mcp_retry(tmp_path, config, monkeypatch):
@@ -247,4 +249,3 @@ def test_default_run_chat_openwrite(tmp_path, config, monkeypatch):
     assert kwargs["cwd"] == tmp_path
     assert "LLM_PROVIDER" in kwargs["env"]
     assert kwargs["env"]["LLM_PROVIDER"] == "openai"
-
