@@ -97,3 +97,47 @@ def test_chat_turn_integration(tmp_path, monkeypatch):
     assert "changed_files" in payload
     assert "usage" in payload
 
+
+def test_chat_turn_producer_preserves_orchestrator_state(tmp_path, monkeypatch):
+    import tools.web_chat_turn as wct
+
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(json.dumps({"recent_messages": [{"role": "user", "content": "hello"}]}))
+    tool_event = {
+        "type": "tool_call",
+        "tool_name": "read_outline",
+        "args": {"path": "outline.md"},
+        "result": {"ok": True},
+        "message": "Read outline.",
+        "sequence": 1,
+    }
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_user_message(self, text):
+            return SimpleNamespace(
+                message="Need the outline scope.",
+                blocked=True,
+                pending_confirmation="outline_scope",
+                open_questions=["Which point of view should lead the chapter?"],
+                tool_events=[tool_event],
+                usage={"prompt_tokens": 123, "completion_tokens": 45},
+            )
+
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+
+    result = json.loads((tmp_path / "turn_result.json").read_text())
+    assert result["status"] == "blocked"
+    assert result["data"]["pending_confirmation"] == "outline_scope"
+    assert result["data"]["open_questions"] == [
+        "Which point of view should lead the chapter?"
+    ]
+    assert result["data"]["usage"] == {"prompt_tokens": 123, "completion_tokens": 45}
+    assert [
+        json.loads(line)
+        for line in (tmp_path / "tool_events.jsonl").read_text().splitlines()
+    ] == [tool_event]

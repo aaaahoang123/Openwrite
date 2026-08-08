@@ -59,17 +59,37 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
         )
         
         result = orchestrator.handle_user_message(user_msg)
-        
+
         # 6. Build and write results
-        # TODO: Capture and write actual tool events if available
+        pending_confirmation = getattr(result, "pending_confirmation", None)
+        if pending_confirmation is None:
+            pending_confirmation = (
+                getattr(getattr(orchestrator, "state", None), "pending_confirmation", "")
+                or None
+            )
+
+        result_open_questions = getattr(result, "open_questions", None)
+        open_questions = (
+            list(session_store.load_or_create().open_questions)
+            if result_open_questions is None
+            else list(result_open_questions)
+        )
+
+        result_tool_events = getattr(result, "tool_events", None) or []
         tool_events_path = project_root / "tool_events.jsonl"
-        tool_events_path.write_text("", encoding="utf-8")
-        
+        tool_events_path.write_text(
+            "".join(
+                json.dumps(event, ensure_ascii=False) + "\n" for event in result_tool_events
+            ),
+            encoding="utf-8",
+        )
+
         status = "blocked" if getattr(result, "blocked", False) else "successful"
         data_payload = {
-            "open_questions": [],
+            "pending_confirmation": pending_confirmation,
+            "open_questions": open_questions,
             "changed_files": [],
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0}
+            "usage": getattr(result, "usage", None) or {},
         }
         
         turn_result = TurnResult(
