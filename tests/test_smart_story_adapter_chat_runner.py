@@ -1,11 +1,12 @@
 import json
-import pytest
-from pathlib import Path
-from tools.smart_story_adapter.chat_config import ChatAdapterConfig
-from tools.smart_story_adapter.runner import ChatTurnAdapterRunner, default_run_chat_openwrite
-from tools.smart_story_adapter.config import AdapterError
 import subprocess
-import os
+
+import pytest
+
+from tools.smart_story_adapter.chat_config import ChatAdapterConfig
+from tools.smart_story_adapter.config import AdapterError
+from tools.smart_story_adapter.runner import ChatTurnAdapterRunner, default_run_chat_openwrite
+
 
 class MockGitOps:
     def __init__(self, conflict=False):
@@ -62,7 +63,11 @@ class MockMcpClient:
 
 
 @pytest.fixture
-def config(tmp_path):
+def config(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "AGENT_TURN_PAYLOAD",
+        '{"recent_messages":[{"role":"user","content":"hello"}],"pending_confirmation":null,"open_questions":[],"source_sha":"old_sha"}',
+    )
     return ChatAdapterConfig(
         chat_session_id=1,
         chat_turn_id=2,
@@ -87,7 +92,7 @@ def config(tmp_path):
 def test_runner_happy_path(tmp_path, config, monkeypatch):
     (tmp_path / "novel_config.yaml").write_text("novel_id: 100")
     
-    os.environ["AGENT_TURN_PAYLOAD"] = '{"recent_messages": []}'
+    monkeypatch.setenv("AGENT_TURN_PAYLOAD", '{"recent_messages": []}')
     
     # Mock openwrite run
     run_args = []
@@ -133,6 +138,29 @@ def test_runner_happy_path(tmp_path, config, monkeypatch):
     assert mcp.completed["status"] == "succeeded"
     assert mcp.completed["assistant_message"] == "done"
     assert mcp.completed["commit_sha"] == "new_sha"
+
+
+def test_runner_fails_when_turn_payload_is_missing(tmp_path, config, monkeypatch, capsys):
+    (tmp_path / "novel_config.yaml").write_text("novel_id: 100")
+    monkeypatch.delenv("AGENT_TURN_PAYLOAD", raising=False)
+
+    def unexpected_openwrite_run(workspace, cfg):
+        raise AssertionError("OpenWrite must not run without a turn payload")
+
+    mcp = MockMcpClient()
+    runner = ChatTurnAdapterRunner(
+        config,
+        mcp=mcp,
+        git_ops=MockGitOps(),
+        run_openwrite=unexpected_openwrite_run,
+    )
+
+    code = runner.run()
+
+    assert code == 1
+    assert mcp.completed is not None
+    assert mcp.completed["failure_category"] == "configuration_missing"
+    assert "AGENT_TURN_PAYLOAD" in capsys.readouterr().err
 
 
 def test_question_only_makes_no_commit(tmp_path, config, monkeypatch):

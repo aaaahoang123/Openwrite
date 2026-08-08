@@ -171,7 +171,13 @@ class ChatTurnAdapterRunner:
             
             # Fetch and write turn_input.json
             input_path = self.workspace / "turn_input.json"
-            input_payload = os.environ.get("AGENT_TURN_PAYLOAD", "{}")
+            input_payload = os.environ.get("AGENT_TURN_PAYLOAD")
+            if not input_payload:
+                raise AdapterError(
+                    "Missing required environment variable: AGENT_TURN_PAYLOAD",
+                    "configuration_missing",
+                    "Chat turn input is missing.",
+                )
             input_path.write_text(input_payload, encoding="utf-8")
 
             self._progress("running")

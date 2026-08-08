@@ -294,8 +294,19 @@ def test_complete_chat_turn_contract_accepts_strings_at_backend_max_length(field
     assert ContractMcp().complete_chat_turn(payload) == {"accepted": True}
 
 
-def test_adapter_emits_complete_chat_turn_payload_accepted_by_backend_contract(tmp_path):
+def test_adapter_emits_complete_chat_turn_payload_accepted_by_backend_contract(tmp_path, monkeypatch):
     (tmp_path / "novel_config.yaml").write_text("novel_id: 100", encoding="utf-8")
+    monkeypatch.setenv(
+        "AGENT_TURN_PAYLOAD",
+        json.dumps(
+            {
+                "recent_messages": [{"role": "user", "content": "Write chapter 5."}],
+                "pending_confirmation": None,
+                "open_questions": [],
+                "source_sha": "old_sha",
+            }
+        ),
+    )
 
     def run_openwrite(workspace, config) -> int:
         (workspace / "turn_result.json").write_text(
