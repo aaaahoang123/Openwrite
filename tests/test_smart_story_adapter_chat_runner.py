@@ -195,6 +195,76 @@ def test_question_only_makes_no_commit(tmp_path, config, monkeypatch):
     assert mcp.completed["commit_sha"] == "old_sha" # fallbacks to old sha
 
 
+def test_runner_maps_nested_blocked_turn_data_without_committing_durable_files(
+    tmp_path, config, monkeypatch
+):
+    (tmp_path / "novel_config.yaml").write_text("novel_id: 100")
+
+    def mock_run(workspace, cfg):
+        (workspace / "turn_result.json").write_text(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "message": "Need confirmation.",
+                    "data": {
+                        "blocked": True,
+                        "next_action": "confirm_outline_scope",
+                        "pending_confirmation": "outline_scope",
+                        "open_questions": [
+                            "Which point of view should lead the chapter?"
+                        ],
+                        "conversation_summary": "Waiting for outline scope confirmation.",
+                        "tool_call_count": 2,
+                    },
+                }
+            )
+        )
+        state_path = (
+            workspace
+            / "data"
+            / "novels"
+            / "100"
+            / "data"
+            / "workflows"
+            / "book_state.yaml"
+        )
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text("pending_confirmation: outline_scope\n", encoding="utf-8")
+        return 0
+
+    git = MockGitOps()
+    git.changed_files = ["data/novels/100/data/workflows/book_state.yaml"]
+    mcp = MockMcpClient()
+    runner = ChatTurnAdapterRunner(
+        config, mcp=mcp, git_ops=git, run_openwrite=mock_run
+    )
+    monkeypatch.setattr("time.sleep", lambda x: None)
+
+    assert runner.run() == 0
+    assert not git.commits
+    assert not git.pushed
+    assert mcp.completed == {
+        "agent_project_id": 3,
+        "chat_turn_id": 2,
+        "status": "succeeded",
+        "assistant_message": "Need confirmation.",
+        "blocked": True,
+        "next_action": "confirm_outline_scope",
+        "pending_confirmation": "outline_scope",
+        "open_questions": ["Which point of view should lead the chapter?"],
+        "changed_files": [],
+        "commit_sha": "old_sha",
+        "output_ids": [],
+        "tool_events": [],
+        "conversation_summary": "Waiting for outline scope confirmation.",
+        "input_tokens": None,
+        "output_tokens": None,
+        "tool_call_count": 2,
+        "failure_category": None,
+        "user_message": None,
+    }
+
+
 def test_git_conflict(tmp_path, config, monkeypatch):
     (tmp_path / "novel_config.yaml").write_text("novel_id: 100")
     
