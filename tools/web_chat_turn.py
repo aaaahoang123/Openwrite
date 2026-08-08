@@ -46,8 +46,8 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
         session_store = SessionStateStore(project_root, novel_id)
         
         # Hydrate state
-        book_state = state_store.load_or_create()
-        session_state = session_store.load_or_create()
+        book_state = state_store.load_or_create(persist=False)
+        session_state = session_store.load_or_create(persist=False)
 
         book_state.pending_confirmation = turn_input.pending_confirmation or ""
         session_state.open_questions = list(turn_input.open_questions)
@@ -72,12 +72,14 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
                 or None
             )
 
+        result_blocked = bool(getattr(result, "blocked", False))
         result_open_questions = getattr(result, "open_questions", None)
-        open_questions = (
-            list(session_state.open_questions)
-            if result_open_questions is None
-            else list(result_open_questions)
-        )
+        if result_open_questions is not None:
+            open_questions = list(result_open_questions)
+        elif result_blocked:
+            open_questions = list(session_state.open_questions)
+        else:
+            open_questions = []
 
         result_tool_events = getattr(result, "tool_events", None) or []
         tool_events_path = project_root / "tool_events.jsonl"
@@ -89,7 +91,7 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
         )
 
         blocked = bool(
-            getattr(result, "blocked", False)
+            result_blocked
             or pending_confirmation
             or open_questions
         )

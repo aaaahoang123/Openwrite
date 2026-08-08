@@ -172,10 +172,13 @@ def test_question_only_makes_no_commit(tmp_path, config, monkeypatch):
             "message": "need input",
             "data": {}
         }))
+        state_path = workspace / "data" / "novels" / "100" / "data" / "workflows" / "book_state.yaml"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text("pending_confirmation: outline_scope\n", encoding="utf-8")
         return 0
 
     git = MockGitOps()
-    git.changed_files = ["turn_result.json"] # not durable
+    git.changed_files = ["data/novels/100/data/workflows/book_state.yaml"]
     mcp = MockMcpClient()
     runner = ChatTurnAdapterRunner(config, mcp=mcp, git_ops=git, run_openwrite=mock_run)
     monkeypatch.setattr("time.sleep", lambda x: None)
@@ -188,6 +191,7 @@ def test_question_only_makes_no_commit(tmp_path, config, monkeypatch):
     assert mcp.completed is not None
     assert mcp.completed["status"] == "succeeded"
     assert mcp.completed["blocked"] is True
+    assert mcp.completed["changed_files"] == []
     assert mcp.completed["commit_sha"] == "old_sha" # fallbacks to old sha
 
 

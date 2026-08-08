@@ -194,6 +194,8 @@ class ChatTurnAdapterRunner:
             
             result_data = json.loads(result_path.read_text(encoding="utf-8"))
             turn_result = TurnResult.from_json(result_data)
+            result_payload = turn_result.data or {}
+            blocked_turn = turn_result.status == "blocked" or bool(result_payload.get("blocked"))
 
             events_path = self.workspace / "tool_events.jsonl"
             tool_events = []
@@ -205,7 +207,11 @@ class ChatTurnAdapterRunner:
             
             # Commit durable files
             changed_files = self.git_ops.get_changed_files(self.workspace)
-            durable_files = [f for f in changed_files if is_durable_path(f)]
+            durable_files = (
+                []
+                if blocked_turn
+                else [f for f in changed_files if is_durable_path(f)]
+            )
             
             final_commit = None
             if durable_files:
@@ -225,8 +231,7 @@ class ChatTurnAdapterRunner:
                     output_ids.append({"type": "private_draft", "id": result.get("private_draft_id"), "duplicate": result.get("duplicate", False)})
 
             # Call complete_chat_turn with retry
-            result_data = turn_result.data or {}
-            usage = result_data.get("usage") or {}
+            usage = result_payload.get("usage") or {}
             terminal_status = "failed" if turn_result.status == "failed" else "succeeded"
             payload = {
                 "agent_project_id": self.config.agent_project_id,

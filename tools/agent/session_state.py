@@ -63,28 +63,33 @@ class SessionStateStore:
             / "agent_session.yaml"
         )
 
-    def load_or_create(self) -> DanteSessionState:
+    def load_or_create(self, *, persist: bool = True) -> DanteSessionState:
         if not self.path.exists():
             state = self._default_state()
-            self.save(state)
+            if persist:
+                self.save(state)
             return state
 
         try:
             data = yaml.safe_load(self.path.read_text(encoding="utf-8"))
         except (yaml.YAMLError, UnicodeDecodeError):
             state = self._default_state()
-            self.save(state)
+            if persist:
+                self.save(state)
             return state
 
         if not data or not isinstance(data, dict):
             state = self._default_state()
-            self.save(state)
+            if persist:
+                self.save(state)
             return state
 
         state = self._from_dict(data)
         needs_repair = self._needs_schema_upgrade(data) or data != self._to_dict(state)
-        if needs_repair or self._compress_if_needed(state):
+        if persist and (needs_repair or self._compress_if_needed(state)):
             self.save(state)
+        elif not persist:
+            self._compress_if_needed(state)
         return state
 
     def save(self, state: DanteSessionState) -> None:

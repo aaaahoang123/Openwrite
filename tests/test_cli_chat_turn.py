@@ -122,8 +122,8 @@ def test_chat_turn_hydrates_continuation_state_before_orchestrator(
         def __init__(self, *args, **kwargs):
             pass
 
-        def load_or_create(self):
-            events.append(("book_load", self.state.pending_confirmation))
+        def load_or_create(self, *, persist=True):
+            events.append(("book_load", self.state.pending_confirmation, persist))
             return self.state
 
         def save(self, state):
@@ -138,8 +138,8 @@ def test_chat_turn_hydrates_continuation_state_before_orchestrator(
         def __init__(self, *args, **kwargs):
             pass
 
-        def load_or_create(self):
-            events.append(("session_load", list(self.state.open_questions)))
+        def load_or_create(self, *, persist=True):
+            events.append(("session_load", list(self.state.open_questions), persist))
             return self.state
 
         def save(self, state):
@@ -173,8 +173,8 @@ def test_chat_turn_hydrates_continuation_state_before_orchestrator(
 
     assert wct.run_chat_turn(in_file, tmp_path) == 0
     assert events == [
-        ("book_load", "stale_confirmation"),
-        ("session_load", ["stale question"]),
+        ("book_load", "stale_confirmation", False),
+        ("session_load", ["stale question"], False),
         ("orchestrator_init", "outline_scope"),
         (
             "handle",
@@ -190,9 +190,42 @@ def test_chat_turn_hydrates_continuation_state_before_orchestrator(
     ).exists()
 
     result = json.loads((tmp_path / "turn_result.json").read_text())
-    assert result["data"]["open_questions"] == [
-        "Which point of view should lead the chapter?"
-    ]
+    assert result["data"]["open_questions"] == []
+
+
+def test_chat_turn_hydration_does_not_create_missing_state_files(tmp_path, monkeypatch):
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(
+        json.dumps(
+            {
+                "recent_messages": [{"role": "user", "content": "continue"}],
+                "pending_confirmation": "outline_scope",
+                "open_questions": ["Which point of view should lead the chapter?"],
+            }
+        )
+    )
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_user_message(self, text):
+            return SimpleNamespace(
+                message="Waiting for confirmation.",
+                blocked=True,
+                pending_confirmation="outline_scope",
+                open_questions=["Which point of view should lead the chapter?"],
+            )
+
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+    assert not (
+        tmp_path / "data/novels/current/data/workflows/book_state.yaml"
+    ).exists()
+    assert not (
+        tmp_path / "data/novels/current/data/workflows/agent_session.yaml"
+    ).exists()
 
 
 def test_chat_turn_producer_preserves_orchestrator_state(tmp_path, monkeypatch):
@@ -238,6 +271,38 @@ def test_chat_turn_producer_preserves_orchestrator_state(tmp_path, monkeypatch):
         json.loads(line)
         for line in (tmp_path / "tool_events.jsonl").read_text().splitlines()
     ] == [tool_event]
+
+
+def test_chat_turn_clears_prior_questions_after_successful_answer(tmp_path, monkeypatch):
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(
+        json.dumps(
+            {
+                "recent_messages": [{"role": "user", "content": "answered"}],
+                "pending_confirmation": None,
+                "open_questions": ["Which point of view should lead the chapter?"],
+            }
+        )
+    )
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_user_message(self, text):
+            return SimpleNamespace(
+                message="The question is resolved.",
+                blocked=False,
+                next_action="continue",
+            )
+
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+
+    result = json.loads((tmp_path / "turn_result.json").read_text())
+    assert result["status"] == "successful"
+    assert result["data"]["open_questions"] == []
 
 
 def test_chat_turn_marks_pending_confirmation_as_blocked(tmp_path, monkeypatch):
