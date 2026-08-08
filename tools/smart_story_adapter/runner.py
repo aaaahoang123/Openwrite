@@ -171,7 +171,13 @@ class ChatTurnAdapterRunner:
             
             # Fetch and write turn_input.json
             input_path = self.workspace / "turn_input.json"
-            input_payload = os.environ.get("AGENT_TURN_PAYLOAD", "{}")
+            input_payload = os.environ.get("AGENT_TURN_PAYLOAD")
+            if not input_payload:
+                raise AdapterError(
+                    "Missing required environment variable: AGENT_TURN_PAYLOAD",
+                    "configuration_missing",
+                    "Chat turn input is missing.",
+                )
             input_path.write_text(input_payload, encoding="utf-8")
 
             self._progress("running")
@@ -188,6 +194,8 @@ class ChatTurnAdapterRunner:
             
             result_data = json.loads(result_path.read_text(encoding="utf-8"))
             turn_result = TurnResult.from_json(result_data)
+            result_payload = turn_result.data or {}
+            blocked_turn = turn_result.status == "blocked" or bool(result_payload.get("blocked"))
 
             events_path = self.workspace / "tool_events.jsonl"
             tool_events = []
@@ -199,7 +207,11 @@ class ChatTurnAdapterRunner:
             
             # Commit durable files
             changed_files = self.git_ops.get_changed_files(self.workspace)
-            durable_files = [f for f in changed_files if is_durable_path(f)]
+            durable_files = (
+                []
+                if blocked_turn
+                else [f for f in changed_files if is_durable_path(f)]
+            )
             
             final_commit = None
             if durable_files:
@@ -219,15 +231,27 @@ class ChatTurnAdapterRunner:
                     output_ids.append({"type": "private_draft", "id": result.get("private_draft_id"), "duplicate": result.get("duplicate", False)})
 
             # Call complete_chat_turn with retry
+            usage = result_payload.get("usage") or {}
+            terminal_status = "failed" if turn_result.status == "failed" else "succeeded"
             payload = {
-                "chat_session_id": self.config.chat_session_id,
+                "agent_project_id": self.config.agent_project_id,
                 "chat_turn_id": self.config.chat_turn_id,
-                "status": turn_result.status,
-                "message": turn_result.message,
-                "data": turn_result.data,
-                "tool_events": tool_events,
+                "status": terminal_status,
+                "assistant_message": turn_result.message,
+                "blocked": bool(result_payload.get("blocked", turn_result.status == "blocked")),
+                "next_action": result_payload.get("next_action"),
+                "pending_confirmation": result_payload.get("pending_confirmation"),
+                "open_questions": result_payload.get("open_questions", []),
+                "changed_files": durable_files,
                 "commit_sha": final_commit,
-                "output_ids": output_ids
+                "output_ids": output_ids,
+                "tool_events": tool_events,
+                "conversation_summary": result_payload.get("conversation_summary"),
+                "input_tokens": usage.get("prompt_tokens"),
+                "output_tokens": usage.get("completion_tokens"),
+                "tool_call_count": result_payload.get("tool_call_count", len(tool_events)),
+                "failure_category": result_payload.get("failure_category") if terminal_status == "failed" else None,
+                "user_message": result_payload.get("user_message") if terminal_status == "failed" else None,
             }
             self._complete_with_retry(payload)
 
@@ -278,17 +302,23 @@ class ChatTurnAdapterRunner:
 
     def _complete_failed(self, exc: AdapterError) -> None:
         payload = {
-            "chat_session_id": self.config.chat_session_id,
+            "agent_project_id": self.config.agent_project_id,
             "chat_turn_id": self.config.chat_turn_id,
             "status": "failed",
-            "message": exc.user_message,
-            "data": {
-                "failure_category": exc.failure_category,
-                "internal_error": str(exc)
-            },
-            "tool_events": [],
+            "assistant_message": exc.user_message,
+            "blocked": False,
+            "next_action": None,
+            "pending_confirmation": None,
+            "open_questions": [],
+            "changed_files": [],
             "commit_sha": None,
-            "output_ids": []
+            "conversation_summary": None,
+            "input_tokens": None,
+            "output_tokens": None,
+            "tool_call_count": 0,
+            "failure_category": exc.failure_category,
+            "user_message": exc.user_message,
+            "tool_events": [],
+            "output_ids": [],
         }
         self._complete_with_retry(payload)
-

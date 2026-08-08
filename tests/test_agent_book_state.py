@@ -12,6 +12,27 @@ def test_load_or_create_defaults_to_discovery(tmp_path: Path):
     assert state.novel_id == "demo"
 
 
+def test_load_or_create_can_skip_persisting_missing_state(tmp_path: Path):
+    store = BookStateStore(tmp_path, "demo")
+
+    state = store.load_or_create(persist=False)
+
+    assert state.stage == BookStage.DISCOVERY
+    assert not store.path.exists()
+
+
+def test_load_or_create_can_skip_repairing_invalid_state(tmp_path: Path):
+    store = BookStateStore(tmp_path, "demo")
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    invalid_content = "stage: ["
+    store.path.write_text(invalid_content, encoding="utf-8")
+
+    state = store.load_or_create(persist=False)
+
+    assert state.stage == BookStage.DISCOVERY
+    assert store.path.read_text(encoding="utf-8") == invalid_content
+
+
 def test_save_and_reload_persists_book_state(tmp_path: Path):
     store = BookStateStore(tmp_path, "demo")
 

@@ -97,3 +97,238 @@ def test_chat_turn_integration(tmp_path, monkeypatch):
     assert "changed_files" in payload
     assert "usage" in payload
 
+
+def test_chat_turn_hydrates_continuation_state_before_orchestrator(
+    tmp_path, monkeypatch
+):
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(
+        json.dumps(
+            {
+                "recent_messages": [{"role": "user", "content": "continue"}],
+                "pending_confirmation": "outline_scope",
+                "open_questions": ["Which point of view should lead the chapter?"],
+            }
+        )
+    )
+    events = []
+
+    class FakeBookState:
+        pending_confirmation = "stale_confirmation"
+
+    class FakeBookStateStore:
+        state = FakeBookState()
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def load_or_create(self, *, persist=True):
+            events.append(("book_load", self.state.pending_confirmation, persist))
+            return self.state
+
+        def save(self, state):
+            events.append(("book_save", state.pending_confirmation))
+
+    class FakeSessionState:
+        open_questions = ["stale question"]
+
+    class FakeSessionStateStore:
+        state = FakeSessionState()
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def load_or_create(self, *, persist=True):
+            events.append(("session_load", list(self.state.open_questions), persist))
+            return self.state
+
+        def save(self, state):
+            events.append(("session_save", list(state.open_questions)))
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            self.initial_state = kwargs.get("initial_state")
+            events.append(
+                (
+                    "orchestrator_init",
+                    getattr(self.initial_state, "pending_confirmation", None),
+                )
+            )
+
+        def handle_user_message(self, text):
+            events.append(
+                (
+                    "handle",
+                    self.initial_state.pending_confirmation
+                    if self.initial_state is not None
+                    else None,
+                    list(FakeSessionStateStore.state.open_questions),
+                )
+            )
+            return SimpleNamespace(message="Continued", blocked=False)
+
+    monkeypatch.setattr(wct, "BookStateStore", FakeBookStateStore)
+    monkeypatch.setattr(wct, "SessionStateStore", FakeSessionStateStore)
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+    assert events == [
+        ("book_load", "stale_confirmation", False),
+        ("session_load", ["stale question"], False),
+        ("orchestrator_init", "outline_scope"),
+        (
+            "handle",
+            "outline_scope",
+            ["Which point of view should lead the chapter?"],
+        ),
+    ]
+    assert not (
+        tmp_path / "data/novels/current/data/workflows/book_state.yaml"
+    ).exists()
+    assert not (
+        tmp_path / "data/novels/current/data/workflows/agent_session.yaml"
+    ).exists()
+
+    result = json.loads((tmp_path / "turn_result.json").read_text())
+    assert result["data"]["open_questions"] == []
+
+
+def test_chat_turn_hydration_does_not_create_missing_state_files(tmp_path, monkeypatch):
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(
+        json.dumps(
+            {
+                "recent_messages": [{"role": "user", "content": "continue"}],
+                "pending_confirmation": "outline_scope",
+                "open_questions": ["Which point of view should lead the chapter?"],
+            }
+        )
+    )
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_user_message(self, text):
+            return SimpleNamespace(
+                message="Waiting for confirmation.",
+                blocked=True,
+                pending_confirmation="outline_scope",
+                open_questions=["Which point of view should lead the chapter?"],
+            )
+
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+    assert not (
+        tmp_path / "data/novels/current/data/workflows/book_state.yaml"
+    ).exists()
+    assert not (
+        tmp_path / "data/novels/current/data/workflows/agent_session.yaml"
+    ).exists()
+
+
+def test_chat_turn_producer_preserves_orchestrator_state(tmp_path, monkeypatch):
+    import tools.web_chat_turn as wct
+
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(json.dumps({"recent_messages": [{"role": "user", "content": "hello"}]}))
+    tool_event = {
+        "type": "tool_call",
+        "tool_name": "read_outline",
+        "args": {"path": "outline.md"},
+        "result": {"ok": True},
+        "message": "Read outline.",
+        "sequence": 1,
+    }
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_user_message(self, text):
+            return SimpleNamespace(
+                message="Need the outline scope.",
+                blocked=True,
+                pending_confirmation="outline_scope",
+                open_questions=["Which point of view should lead the chapter?"],
+                tool_events=[tool_event],
+                usage={"prompt_tokens": 123, "completion_tokens": 45},
+            )
+
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+
+    result = json.loads((tmp_path / "turn_result.json").read_text())
+    assert result["status"] == "blocked"
+    assert result["data"]["pending_confirmation"] == "outline_scope"
+    assert result["data"]["open_questions"] == [
+        "Which point of view should lead the chapter?"
+    ]
+    assert result["data"]["usage"] == {"prompt_tokens": 123, "completion_tokens": 45}
+    assert [
+        json.loads(line)
+        for line in (tmp_path / "tool_events.jsonl").read_text().splitlines()
+    ] == [tool_event]
+
+
+def test_chat_turn_clears_prior_questions_after_successful_answer(tmp_path, monkeypatch):
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(
+        json.dumps(
+            {
+                "recent_messages": [{"role": "user", "content": "answered"}],
+                "pending_confirmation": None,
+                "open_questions": ["Which point of view should lead the chapter?"],
+            }
+        )
+    )
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_user_message(self, text):
+            return SimpleNamespace(
+                message="The question is resolved.",
+                blocked=False,
+                next_action="continue",
+            )
+
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+
+    result = json.loads((tmp_path / "turn_result.json").read_text())
+    assert result["status"] == "successful"
+    assert result["data"]["open_questions"] == []
+
+
+def test_chat_turn_marks_pending_confirmation_as_blocked(tmp_path, monkeypatch):
+    in_file = tmp_path / "turn_input.json"
+    in_file.write_text(
+        json.dumps({"recent_messages": [{"role": "user", "content": "continue"}]})
+    )
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def handle_user_message(self, text):
+            return SimpleNamespace(
+                message="Please confirm the outline scope.",
+                blocked=False,
+                next_action="confirm_outline_scope",
+                pending_confirmation="outline_scope",
+                open_questions=[],
+            )
+
+    monkeypatch.setattr(wct, "OpenWriteOrchestrator", FakeOrchestrator)
+
+    assert wct.run_chat_turn(in_file, tmp_path) == 0
+
+    result = json.loads((tmp_path / "turn_result.json").read_text())
+    assert result["status"] == "blocked"
+    assert result["data"]["blocked"] is True
+    assert result["data"]["next_action"] == "confirm_outline_scope"

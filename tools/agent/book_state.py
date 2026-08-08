@@ -49,27 +49,31 @@ class BookStateStore:
             / "book_state.yaml"
         )
 
-    def load_or_create(self) -> BookState:
+    def load_or_create(self, *, persist: bool = True) -> BookState:
         if not self.path.exists():
             state = BookState(novel_id=self.novel_id)
-            self.save(state)
+            if persist:
+                self.save(state)
             return state
 
         try:
             data = yaml.safe_load(self.path.read_text(encoding="utf-8"))
         except Exception:
             state = BookState(novel_id=self.novel_id)
-            self.save(state)
+            if persist:
+                self.save(state)
             return state
 
         if not data:
             state = BookState(novel_id=self.novel_id)
-            self.save(state)
+            if persist:
+                self.save(state)
             return state
 
         if not isinstance(data, dict):
             state = BookState(novel_id=self.novel_id)
-            self.save(state)
+            if persist:
+                self.save(state)
             return state
 
         return self._from_dict(data)

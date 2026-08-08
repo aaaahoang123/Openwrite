@@ -1,12 +1,14 @@
 from __future__ import annotations
-from dataclasses import dataclass, field, asdict
+
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
+
 
 @dataclass(frozen=True)
 class TurnInput:
     recent_messages: list[dict[str, Any]]
-    pending_confirmation: dict[str, Any] | None = None
-    open_questions: list[dict[str, Any]] = field(default_factory=list)
+    pending_confirmation: str | None = None
+    open_questions: list[str] = field(default_factory=list)
     source_sha: str | None = None
 
     @classmethod
@@ -20,7 +22,6 @@ class TurnInput:
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
-
 @dataclass(frozen=True)
 class ToolEvent:
     event_type: str
@@ -54,4 +55,3 @@ class TurnResult:
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
-

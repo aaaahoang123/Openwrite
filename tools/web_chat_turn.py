@@ -46,8 +46,11 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
         session_store = SessionStateStore(project_root, novel_id)
         
         # Hydrate state
-        state_store.load_or_create()
-        session_store.load_or_create()
+        book_state = state_store.load_or_create(persist=False)
+        session_state = session_store.load_or_create(persist=False)
+
+        book_state.pending_confirmation = turn_input.pending_confirmation or ""
+        session_state.open_questions = list(turn_input.open_questions)
         
         # 5. Call Orchestrator
         tool_executors = build_cli_tool_executors(project_root)
@@ -55,21 +58,51 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
             project_root=project_root,
             novel_id=novel_id,
             state_store=state_store,
-            tool_executors=tool_executors
+            tool_executors=tool_executors,
+            initial_state=book_state,
         )
         
         result = orchestrator.handle_user_message(user_msg)
-        
+
         # 6. Build and write results
-        # TODO: Capture and write actual tool events if available
+        pending_confirmation = getattr(result, "pending_confirmation", None)
+        if pending_confirmation is None:
+            pending_confirmation = (
+                getattr(getattr(orchestrator, "state", None), "pending_confirmation", "")
+                or None
+            )
+
+        result_blocked = bool(getattr(result, "blocked", False))
+        result_open_questions = getattr(result, "open_questions", None)
+        if result_open_questions is not None:
+            open_questions = list(result_open_questions)
+        elif result_blocked:
+            open_questions = list(session_state.open_questions)
+        else:
+            open_questions = []
+
+        result_tool_events = getattr(result, "tool_events", None) or []
         tool_events_path = project_root / "tool_events.jsonl"
-        tool_events_path.write_text("", encoding="utf-8")
-        
-        status = "blocked" if getattr(result, "blocked", False) else "successful"
+        tool_events_path.write_text(
+            "".join(
+                json.dumps(event, ensure_ascii=False) + "\n" for event in result_tool_events
+            ),
+            encoding="utf-8",
+        )
+
+        blocked = bool(
+            result_blocked
+            or pending_confirmation
+            or open_questions
+        )
+        status = "blocked" if blocked else "successful"
         data_payload = {
-            "open_questions": [],
+            "blocked": blocked,
+            "next_action": getattr(result, "next_action", None),
+            "pending_confirmation": pending_confirmation,
+            "open_questions": open_questions,
             "changed_files": [],
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0}
+            "usage": getattr(result, "usage", None) or {},
         }
         
         turn_result = TurnResult(

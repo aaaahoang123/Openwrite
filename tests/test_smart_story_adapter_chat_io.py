@@ -1,11 +1,11 @@
-import pytest
-from tools.smart_story_adapter.chat_io import TurnInput, ToolEvent, TurnResult
+from tools.smart_story_adapter.chat_io import ToolEvent, TurnInput, TurnResult
+
 
 def test_turn_input_roundtrip():
     data = {
         "recent_messages": [{"role": "user", "content": "hello"}],
-        "pending_confirmation": {"type": "action", "description": "do something"},
-        "open_questions": [{"id": 1, "question": "why?"}],
+        "pending_confirmation": "outline_scope",
+        "open_questions": ["why?"],
         "source_sha": "abcdef123"
     }
     obj = TurnInput.from_json(data)

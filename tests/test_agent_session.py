@@ -33,6 +33,27 @@ def test_load_or_create_creates_default_session_state(tmp_path: Path):
     assert store.path.name == "agent_session.yaml"
 
 
+def test_load_or_create_can_skip_persisting_missing_state(tmp_path: Path):
+    store = SessionStateStore(tmp_path, "demo")
+
+    state = store.load_or_create(persist=False)
+
+    assert state.session_id == "demo"
+    assert not store.path.exists()
+
+
+def test_load_or_create_can_skip_repairing_invalid_state(tmp_path: Path):
+    store = SessionStateStore(tmp_path, "demo")
+    store.path.parent.mkdir(parents=True, exist_ok=True)
+    invalid_content = "recent_turns: ["
+    store.path.write_text(invalid_content, encoding="utf-8")
+
+    state = store.load_or_create(persist=False)
+
+    assert state.session_id == "demo"
+    assert store.path.read_text(encoding="utf-8") == invalid_content
+
+
 def test_save_compresses_old_turns_into_summary(tmp_path: Path):
     store = SessionStateStore(tmp_path, "demo")
     state = DanteSessionState(session_id="demo")
