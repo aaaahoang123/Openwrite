@@ -52,6 +52,7 @@ class OpenWriteOrchestrator:
         state_store: Optional[BookStateStore] = None,
         planning_store: Optional[StoryPlanningStore] = None,
         tool_executors: Optional[dict[str, Callable[[dict[str, Any]], dict[str, Any]]]] = None,
+        initial_state: Optional[BookState] = None,
     ) -> None:
         self.project_root = Path(project_root).resolve()
         self.novel_id = novel_id
@@ -60,6 +61,7 @@ class OpenWriteOrchestrator:
             self.project_root, novel_id
         )
         self.tool_executors = dict(tool_executors or {})
+        self._initial_state = initial_state
         self.state = BookState(novel_id=novel_id)
 
     @classmethod
@@ -326,7 +328,11 @@ class OpenWriteOrchestrator:
             }
 
     def handle_user_message(self, text: str) -> OrchestratorResult:
-        self.state = self.state_store.load_or_create()
+        if self._initial_state is not None:
+            self.state = self._initial_state
+            self._initial_state = None
+        else:
+            self.state = self.state_store.load_or_create()
 
         if self._is_status_request(text):
             return self._handle_status_request()

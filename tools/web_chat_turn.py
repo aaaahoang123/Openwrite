@@ -50,9 +50,7 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
         session_state = session_store.load_or_create()
 
         book_state.pending_confirmation = turn_input.pending_confirmation or ""
-        state_store.save(book_state)
         session_state.open_questions = list(turn_input.open_questions)
-        session_store.save(session_state)
         
         # 5. Call Orchestrator
         tool_executors = build_cli_tool_executors(project_root)
@@ -60,7 +58,8 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
             project_root=project_root,
             novel_id=novel_id,
             state_store=state_store,
-            tool_executors=tool_executors
+            tool_executors=tool_executors,
+            initial_state=book_state,
         )
         
         result = orchestrator.handle_user_message(user_msg)
@@ -75,7 +74,7 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
 
         result_open_questions = getattr(result, "open_questions", None)
         open_questions = (
-            list(session_store.load_or_create().open_questions)
+            list(session_state.open_questions)
             if result_open_questions is None
             else list(result_open_questions)
         )
@@ -89,8 +88,15 @@ def run_chat_turn(input_path: Path, project_root: Path) -> int:
             encoding="utf-8",
         )
 
-        status = "blocked" if getattr(result, "blocked", False) else "successful"
+        blocked = bool(
+            getattr(result, "blocked", False)
+            or pending_confirmation
+            or open_questions
+        )
+        status = "blocked" if blocked else "successful"
         data_payload = {
+            "blocked": blocked,
+            "next_action": getattr(result, "next_action", None),
             "pending_confirmation": pending_confirmation,
             "open_questions": open_questions,
             "changed_files": [],
