@@ -117,6 +117,15 @@ COMPLETE_CHAT_TURN_FIELD_TYPES = {
     "failure_category": str,
     "user_message": str,
 }
+COMPLETE_CHAT_TURN_STRING_MAX_LENGTHS = {
+    "assistant_message": 12000,
+    "next_action": 120,
+    "pending_confirmation": 120,
+    "commit_sha": 80,
+    "conversation_summary": 2000,
+    "failure_category": 80,
+    "user_message": 2000,
+}
 TERMINAL_COMPLETE_CHAT_TURN_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
@@ -128,6 +137,10 @@ def validate_complete_chat_turn_payload(payload: dict) -> None:
     if missing:
         raise ValueError(f"complete_chat_turn missing required fields: {sorted(missing)}")
 
+    # Laravel validates only declared keys and may coerce some boolean/integer values.
+    # This adapter contract is intentionally stricter: outbound payloads contain only
+    # declared fields and use canonical JSON bool/int types, so validate those guarantees
+    # here rather than claiming Laravel rejects the broader inputs.
     permitted_fields = REQUIRED_COMPLETE_CHAT_TURN_FIELDS | OPTIONAL_COMPLETE_CHAT_TURN_FIELDS
     unexpected = set(payload) - permitted_fields
     if unexpected:
@@ -145,6 +158,11 @@ def validate_complete_chat_turn_payload(payload: dict) -> None:
             raise ValueError(f"complete_chat_turn field {field} is required")
         if value is not None and not _matches_complete_chat_turn_type(value, expected_type):
             raise ValueError(f"complete_chat_turn field {field} has an invalid type")
+
+    for field, max_length in COMPLETE_CHAT_TURN_STRING_MAX_LENGTHS.items():
+        value = payload.get(field)
+        if value is not None and len(value) > max_length:
+            raise ValueError(f"complete_chat_turn field {field} exceeds max length {max_length}")
 
     if payload["agent_project_id"] < 1 or payload["chat_turn_id"] < 1:
         raise ValueError("complete_chat_turn identifiers must be positive")
@@ -239,6 +257,39 @@ def test_complete_chat_turn_contract_allows_optional_fields_to_be_omitted():
         "chat_turn_id": CHAT_TURN_ID,
         "status": "succeeded",
     }
+
+    assert ContractMcp().complete_chat_turn(payload) == {"accepted": True}
+
+
+@pytest.mark.parametrize(
+    ("field", "max_length"),
+    [
+        ("assistant_message", 12000),
+        ("next_action", 120),
+        ("pending_confirmation", 120),
+        ("commit_sha", 80),
+        ("conversation_summary", 2000),
+        ("failure_category", 80),
+        ("user_message", 2000),
+    ],
+    ids=lambda value: str(value),
+)
+def test_complete_chat_turn_contract_rejects_strings_over_backend_max_length(field, max_length):
+    payload = valid_complete_chat_turn_payload()
+    payload[field] = "x" * (max_length + 1)
+
+    with pytest.raises(ValueError, match=f"field {field}"):
+        ContractMcp().complete_chat_turn(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "max_length"),
+    list(COMPLETE_CHAT_TURN_STRING_MAX_LENGTHS.items()),
+    ids=lambda value: str(value),
+)
+def test_complete_chat_turn_contract_accepts_strings_at_backend_max_length(field, max_length):
+    payload = valid_complete_chat_turn_payload()
+    payload[field] = "x" * max_length
 
     assert ContractMcp().complete_chat_turn(payload) == {"accepted": True}
 
